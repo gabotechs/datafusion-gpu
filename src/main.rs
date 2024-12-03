@@ -54,6 +54,7 @@ async fn main() -> anyhow::Result<()> {
         match readline {
             Ok(line) => {
                 rl.add_history_entry(&line)?;
+                rl.save_history(".history.txt")?;
                 if line == "q" || line == "exit" || line == "quit" {
                     return Ok(());
                 }
