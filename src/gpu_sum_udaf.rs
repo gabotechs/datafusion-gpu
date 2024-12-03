@@ -11,9 +11,11 @@ use datafusion::logical_expr::{
 };
 use delegate::delegate;
 use std::any::Any;
+use std::cmp::min;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
-use tokio::time::Instant;
+
+const STEP: usize = 1024;
 
 pub fn udaf<R: Runtime>(compute_client: Arc<ComputeClient<R::Server, R::Channel>>) -> AggregateUDF {
     AggregateUDF::from(GpuSum::<R> {
@@ -135,50 +137,54 @@ impl<R: Runtime> Accumulator for GpuSumAccumulator<R> {
     fn update_batch(&mut self, values: &[ArrayRef]) -> Result<()> {
         let data_type = values[0].data_type();
         let data = values[0].to_data();
+        let data = data.buffers().first().unwrap().as_slice();
+
         let len = values[0].len();
-        let data: Vec<&[u8]> = data.buffers().iter().map(|b| b.as_slice()).collect();
 
-        let output = match data_type {
-            DataType::Int32 => self.compute_client.empty(size_of::<i32>()),
-            DataType::UInt32 => self.compute_client.empty(size_of::<u32>()),
-            DataType::Float32 => self.compute_client.empty(size_of::<f32>()),
-            v => return not_impl_err!("SumGpu not supported for {}", v),
-        };
-        let start = Instant::now();
-        let input = self.compute_client.create(data[0]);
+        for start in (0..len).step_by(STEP) {
+            let cube_len = min(STEP, len - start);
 
-        let start = Instant::now();
-        unsafe {
-            macro_rules! run {
-                ($ty: ty) => {
-                    sum_basic::launch_unchecked::<$ty, R>(
-                        self.compute_client.as_ref(),
-                        CubeCount::Static(1, 1, 1),
-                        CubeDim::new(len as u32, 1, 1),
-                        ArrayArg::from_raw_parts(&input, len, 1),
-                        ArrayArg::from_raw_parts(&output, len, 1),
-                        Some(len as u32),
-                    )
-                };
-            }
+            let input = self.compute_client.create(&data[start*4..(start+cube_len)*4]);
 
-            match data_type {
-                DataType::Int32 => run!(i32),
-                DataType::UInt32 => run!(u32),
-                DataType::Float32 => run!(f32),
+            let output = match data_type {
+                DataType::Int32 => self.compute_client.empty(size_of::<i32>()),
+                DataType::UInt32 => self.compute_client.empty(size_of::<u32>()),
+                DataType::Float32 => self.compute_client.empty(size_of::<f32>()),
                 v => return not_impl_err!("SumGpu not supported for {}", v),
+            };
+
+            unsafe {
+                macro_rules! run {
+                    ($ty: ty) => {
+                        sum_basic::launch_unchecked::<$ty, R>(
+                            self.compute_client.as_ref(),
+                            CubeCount::Static(1, 1, 1),
+                            CubeDim::new(cube_len as u32, 1, 1),
+                            ArrayArg::from_raw_parts(&input, cube_len, 1),
+                            ArrayArg::from_raw_parts(&output, cube_len, 1),
+                            Some(cube_len as u32),
+                        )
+                    };
+                }
+
+                match data_type {
+                    DataType::Int32 => run!(i32),
+                    DataType::UInt32 => run!(u32),
+                    DataType::Float32 => run!(f32),
+                    v => return not_impl_err!("SumGpu not supported for {}", v),
+                }
             }
+            
+            let bytes = self.compute_client.read(output.binding());
+
+            let v = match data_type {
+                DataType::Int32 => i32::from_bytes(&bytes)[0] as f32,
+                DataType::UInt32 => u32::from_bytes(&bytes)[0] as f32,
+                DataType::Float32 => f32::from_bytes(&bytes)[0],
+                v => return not_impl_err!("SumGpu not supported for {}", v),
+            };
+            self.result += v;
         }
-
-        let bytes = self.compute_client.read(output.clone().binding());
-
-        let v = match data_type {
-            DataType::Int32 => i32::from_bytes(&bytes)[0] as f32,
-            DataType::UInt32 => u32::from_bytes(&bytes)[0] as f32,
-            DataType::Float32 => f32::from_bytes(&bytes)[0],
-            v => return not_impl_err!("SumGpu not supported for {}", v),
-        };
-        self.result += v;
         Ok(())
     }
 
