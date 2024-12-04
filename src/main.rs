@@ -1,7 +1,6 @@
 mod gpu_sum_udaf;
 
 use clap::Parser;
-use cubecl::wgpu::WgpuRuntime;
 use cubecl::Runtime;
 use datafusion::arrow::array::{Float32Array, Int32Array, RecordBatch};
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
@@ -13,6 +12,10 @@ use rand::Rng;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::sync::Arc;
+#[cfg(feature = "cuda")]
+use cubecl::cuda::CudaRuntime;
+#[cfg(not(feature = "cuda"))]
+use cubecl::wgpu::WgpuRuntime;
 use tokio::time::Instant;
 
 #[derive(Parser)]
@@ -36,7 +39,10 @@ where
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    let ctx = build_ctx(&args).await?;
+    #[cfg(feature = "cuda")]
+    let ctx = build_ctx::<CudaRuntime>(&args).await?;
+    #[cfg(not(feature = "cuda"))]
+    let ctx = build_ctx::<WgpuRuntime>(&args).await?;
 
     let mut rl = DefaultEditor::new()?;
     _ = rl.load_history(".history.txt");
@@ -85,7 +91,10 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
-async fn build_ctx(args: &Args) -> datafusion::error::Result<SessionContext> {
+async fn build_ctx<R: Runtime>(args: &Args) -> datafusion::error::Result<SessionContext>
+where
+    <R as cubecl::Runtime>::Device: std::default::Default,
+{
     let config = SessionConfig::new();
     let runtime = Arc::new(RuntimeEnv::default());
     let state = SessionStateBuilder::new()
@@ -94,7 +103,7 @@ async fn build_ctx(args: &Args) -> datafusion::error::Result<SessionContext> {
         .with_runtime_env(runtime)
         .build();
 
-    let compute_client = WgpuRuntime::client(&Default::default());
+    let compute_client = R::client(&Default::default());
     let ctx = SessionContext::new_with_state(state);
 
     let schema = Arc::new(Schema::new(vec![
@@ -111,7 +120,7 @@ async fn build_ctx(args: &Args) -> datafusion::error::Result<SessionContext> {
     )?;
 
     let table = MemTable::try_new(schema, vec![vec![batch]])?;
-    ctx.register_udaf(gpu_sum_udaf::udaf::<WgpuRuntime>(Arc::new(compute_client)));
+    ctx.register_udaf(gpu_sum_udaf::udaf::<R>(Arc::new(compute_client)));
     ctx.register_table("numbers", Arc::new(table))?;
     ctx.register_csv("test", "datasets/test.csv", CsvReadOptions::default())
         .await?;
