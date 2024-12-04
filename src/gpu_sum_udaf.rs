@@ -11,9 +11,10 @@ use datafusion::logical_expr::{
 };
 use delegate::delegate;
 use std::any::Any;
+use std::cmp::min;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
-use tokio::time::Instant;
+use cubecl::Feature;
 
 pub fn udaf<R: Runtime>(compute_client: Arc<ComputeClient<R::Server, R::Channel>>) -> AggregateUDF {
     AggregateUDF::from(GpuSum::<R> {
@@ -144,17 +145,15 @@ impl<R: Runtime> Accumulator for GpuSumAccumulator<R> {
             DataType::Float32 => self.compute_client.empty(size_of::<f32>()),
             v => return not_impl_err!("SumGpu not supported for {}", v),
         };
-        let start = Instant::now();
         let input = self.compute_client.create(data[0]);
 
-        let start = Instant::now();
         unsafe {
             macro_rules! run {
                 ($ty: ty) => {
                     sum_basic::launch_unchecked::<$ty, R>(
                         self.compute_client.as_ref(),
-                        CubeCount::Static(1, 1, 1),
-                        CubeDim::new(len as u32, 1, 1),
+                        CubeCount::Static((len / 1024) as u32 + 1, 1, 1),
+                        CubeDim::new(min(len, 1024) as u32, 1, 1),
                         ArrayArg::from_raw_parts(&input, len, 1),
                         ArrayArg::from_raw_parts(&output, len, 1),
                         Some(len as u32),
