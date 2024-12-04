@@ -16,9 +16,10 @@ use rustyline::DefaultEditor;
 use std::sync::Arc;
 #[cfg(feature = "cuda")]
 use cubecl::cuda::CudaRuntime;
+#[cfg(feature = "cuda")]
+use cudarc::driver::CudaDevice;
 #[cfg(not(feature = "cuda"))]
 use cubecl::wgpu::WgpuRuntime;
-use cudarc::driver::CudaDevice;
 use tokio::time::Instant;
 
 #[derive(Parser)]
