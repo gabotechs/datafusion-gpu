@@ -14,7 +14,6 @@ use std::any::Any;
 use std::cmp::min;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
-use cubecl::Feature;
 
 pub fn udaf<R: Runtime>(compute_client: Arc<ComputeClient<R::Server, R::Channel>>) -> AggregateUDF {
     AggregateUDF::from(GpuSum::<R> {
