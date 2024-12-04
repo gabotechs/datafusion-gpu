@@ -34,7 +34,7 @@ impl<R: Runtime> AggregateUDFImpl for GpuSum<R> {
     }
 
     fn name(&self) -> &str {
-        "sum_gpu"
+        "sum_cubecl"
     }
 
     fn return_type(&self, _: &[DataType]) -> Result<DataType> {

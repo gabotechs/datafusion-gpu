@@ -1,4 +1,6 @@
-mod gpu_sum_udaf;
+mod cubecl_sum_udaf;
+#[cfg(feature = "cuda")]
+mod cudarc_sum_udaf;
 
 use clap::Parser;
 use cubecl::Runtime;
@@ -16,6 +18,7 @@ use std::sync::Arc;
 use cubecl::cuda::CudaRuntime;
 #[cfg(not(feature = "cuda"))]
 use cubecl::wgpu::WgpuRuntime;
+use cudarc::driver::CudaDevice;
 use tokio::time::Instant;
 
 #[derive(Parser)]
@@ -91,7 +94,7 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
-async fn build_ctx<R: Runtime>(args: &Args) -> datafusion::error::Result<SessionContext>
+async fn build_ctx<R: Runtime>(args: &Args) -> anyhow::Result<SessionContext>
 where
     <R as cubecl::Runtime>::Device: std::default::Default,
 {
@@ -120,7 +123,9 @@ where
     )?;
 
     let table = MemTable::try_new(schema, vec![vec![batch]])?;
-    ctx.register_udaf(gpu_sum_udaf::udaf::<R>(Arc::new(compute_client)));
+    ctx.register_udaf(cubecl_sum_udaf::udaf::<R>(Arc::new(compute_client)));
+    #[cfg(feature = "cuda")]
+    ctx.register_udaf(cudarc_sum_udaf::udaf(CudaDevice::new(0)?));
     ctx.register_table("numbers", Arc::new(table))?;
     ctx.register_csv("test", "datasets/test.csv", CsvReadOptions::default())
         .await?;

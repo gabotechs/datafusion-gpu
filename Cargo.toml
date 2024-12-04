@@ -15,3 +15,4 @@ cubecl = { version = "0.3.0", features = ["wgpu"]}
 rand = "0.8.5"
 clap = { version = "4.5.21", features = ["derive"] }
 rustyline = "15.0.0"
+cudarc = "0.12.1"
