@@ -4,7 +4,7 @@ mod cudarc_sum_udaf;
 
 use clap::Parser;
 use cubecl::Runtime;
-use datafusion::arrow::array::{Float32Array, Int32Array, RecordBatch};
+use datafusion::arrow::array::{Float32Array, Int32Array, RecordBatch, StringArray};
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::datasource::MemTable;
 use datafusion::execution::runtime_env::RuntimeEnv;
@@ -29,14 +29,6 @@ struct Args {
 
     #[arg(short, long, default_value = "1024")]
     len: usize,
-}
-
-fn generate_random_numbers<T>(count: usize) -> Vec<T>
-where
-    rand::distributions::Standard: rand::distributions::Distribution<T>,
-{
-    let mut rng = rand::thread_rng();
-    (0..count).map(|_| rng.gen::<T>()).collect()
 }
 
 #[tokio::main]
@@ -111,6 +103,7 @@ where
     let ctx = SessionContext::new_with_state(state);
 
     let schema = Arc::new(Schema::new(vec![
+        Field::new("string", DataType::Utf8, false),
         Field::new("float", DataType::Float32, false),
         Field::new("int", DataType::Int32, false),
     ]));
@@ -118,6 +111,7 @@ where
     let batch = RecordBatch::try_new(
         schema.clone(),
         vec![
+            Arc::new(StringArray::from(generate_random_letters(args.len))),
             Arc::new(Float32Array::from(generate_random_numbers::<f32>(args.len))),
             Arc::new(Int32Array::from(generate_random_numbers::<i32>(args.len))),
         ],
@@ -127,8 +121,22 @@ where
     ctx.register_udaf(cubecl_sum_udaf::udaf::<R>(Arc::new(compute_client)));
     #[cfg(feature = "cuda")]
     ctx.register_udaf(cudarc_sum_udaf::udaf(CudaDevice::new(0)?));
-    ctx.register_table("numbers", Arc::new(table))?;
+    ctx.register_table("types", Arc::new(table))?;
     ctx.register_csv("test", "datasets/test.csv", CsvReadOptions::default())
         .await?;
     Ok(ctx)
 }
+
+fn generate_random_letters(count: usize) -> Vec<String> {
+    let mut rng = rand::thread_rng();
+    (0..count).map(|_| rng.gen_range('a'..='z').to_string()).collect()
+}
+
+fn generate_random_numbers<T>(count: usize) -> Vec<T>
+where
+    rand::distributions::Standard: rand::distributions::Distribution<T>,
+{
+    let mut rng = rand::thread_rng();
+    (0..count).map(|_| rng.gen::<T>()).collect()
+}
+
