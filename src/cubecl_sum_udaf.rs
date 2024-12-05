@@ -1,5 +1,6 @@
-use cubecl::prelude::Array as CubeArray;
 use cubecl::prelude::*;
+use cubecl_reduce::reduce_plane;
+use cubecl_reduce::Sum as CubeSum;
 use datafusion::arrow::array::{Array, ArrayRef};
 use datafusion::arrow::datatypes::{DataType, Field, Float32Type};
 use datafusion::common::{exec_err, not_impl_err, Result, ScalarValue};
@@ -112,22 +113,14 @@ impl<R: Runtime> Debug for GpuSumAccumulator<R> {
 }
 
 #[cube(launch_unchecked)]
-fn sum_basic<N: Numeric>(
-    input: &CubeArray<N>,
-    output: &mut CubeArray<N>,
-    #[comptime] end: Option<u32>,
+fn sum<N: Numeric>(
+    input: &Tensor<Line<N>>,
+    output: &mut Tensor<Line<N>>,
+    reduce_dim: u32,
+    #[comptime] cube_dim: u32,
+    #[comptime] exact_shape: bool,
 ) {
-    let unroll = end.is_some();
-    let end = end.unwrap_or_else(|| input.len());
-
-    let mut sum = N::from_int(0);
-
-    #[unroll(unroll)]
-    for i in 0..end {
-        sum += input[i];
-    }
-
-    output[UNIT_POS] = sum;
+    reduce_plane::<CubeSum, N, N>(input, output, reduce_dim, cube_dim, exact_shape)
 }
 
 impl<R: Runtime> Accumulator for GpuSumAccumulator<R> {
@@ -135,49 +128,45 @@ impl<R: Runtime> Accumulator for GpuSumAccumulator<R> {
         let data_type = values[0].data_type();
         let data = values[0].to_data();
         let len = values[0].len();
-        let data: Vec<&[u8]> = data.buffers().iter().map(|b| b.as_slice()).collect();
+        let data: &[u8] = data.buffers().first().map(|b| b.as_slice()).unwrap();
 
-        let block_size = 256;
+        let block_size = 1024;
         let num_blocks = len.div_ceil(block_size);
 
-        let output = match data_type {
-            DataType::Int32 => self.compute_client.empty(num_blocks * size_of::<i32>()),
-            DataType::UInt32 => self.compute_client.empty(num_blocks * size_of::<u32>()),
-            DataType::Float32 => self.compute_client.empty(num_blocks * size_of::<f32>()),
+        let output_handle = match data_type {
+            DataType::Int32 => self.compute_client.empty(size_of::<i32>()),
+            DataType::UInt32 => self.compute_client.empty(size_of::<u32>()),
+            DataType::Float32 => self.compute_client.empty(size_of::<f32>()),
             v => return not_impl_err!("SumGpu not supported for {}", v),
         };
-        let input = self.compute_client.create(data[0]);
+        let input_handle = self.compute_client.create(data);
 
+        // TODO: Why this can only be 1?
+        const LINE_SIZE: u8 = 1;
         unsafe {
-            macro_rules! run {
-                ($ty: ty) => {
-                    sum_basic::launch_unchecked::<$ty, R>(
-                        self.compute_client.as_ref(),
-                        CubeCount::Static(num_blocks as u32, 1, 1),
-                        CubeDim::new(block_size as u32, 1, 1),
-                        ArrayArg::from_raw_parts(&input, len, 1),
-                        ArrayArg::from_raw_parts(&output, len, 1),
-                        Some(len as u32),
-                    )
-                };
-            }
-
-            match data_type {
-                DataType::Int32 => run!(i32),
-                DataType::UInt32 => run!(u32),
-                DataType::Float32 => run!(f32),
-                v => return not_impl_err!("SumGpu not supported for {}", v),
-            }
+            sum::launch_unchecked::<f32, R>(
+                self.compute_client.as_ref(),
+                CubeCount::new_1d(num_blocks as u32),
+                CubeDim::new_1d(block_size as u32),
+                TensorArg::from_raw_parts::<f32>(&input_handle, &[1], &[len], LINE_SIZE),
+                TensorArg::from_raw_parts::<f32>(&output_handle, &[1], &[1], LINE_SIZE),
+                ScalarArg::new(0),
+                block_size as u32,
+                false, // TODO: calc if the plane dim has the exact size of the data.
+            )
         }
 
-        let bytes = self.compute_client.read(output.clone().binding());
+        let mut bytes = self
+            .compute_client
+            .read(vec![output_handle.clone().binding()]);
+        let bytes = bytes.remove(0);
 
         macro_rules! dump {
             ($ty: ty) => {
                 for v in <$ty>::from_bytes(&bytes) {
                     self.result += *v as f32;
                 }
-            }
+            };
         }
 
         match data_type {
