@@ -144,16 +144,27 @@ impl<R: Runtime> Accumulator for GpuSumAccumulator<R> {
         // TODO: Why this can only be 1?
         const LINE_SIZE: u8 = 1;
         unsafe {
-            sum::launch_unchecked::<f32, R>(
-                self.compute_client.as_ref(),
-                CubeCount::new_1d(num_blocks as u32),
-                CubeDim::new_1d(block_size as u32),
-                TensorArg::from_raw_parts::<f32>(&input_handle, &[1], &[len], LINE_SIZE),
-                TensorArg::from_raw_parts::<f32>(&output_handle, &[1], &[1], LINE_SIZE),
-                ScalarArg::new(0),
-                block_size as u32,
-                false, // TODO: calc if the plane dim has the exact size of the data.
-            )
+            macro_rules! run {
+                ($ty: ty) => {
+                    sum::launch_unchecked::<$ty, R>(
+                        self.compute_client.as_ref(),
+                        CubeCount::new_1d(num_blocks as u32),
+                        CubeDim::new_1d(block_size as u32),
+                        TensorArg::from_raw_parts::<$ty>(&input_handle, &[1], &[len], LINE_SIZE),
+                        TensorArg::from_raw_parts::<$ty>(&output_handle, &[1], &[1], LINE_SIZE),
+                        ScalarArg::new(0),
+                        block_size as u32,
+                        false, // TODO: calc if the plane dim has the exact size of the data.
+                    )
+                };
+            }
+
+            match data_type {
+                DataType::Int32 => run!(i32),
+                DataType::UInt32 => run!(u32),
+                DataType::Float32 => run!(f32),
+                v => return not_impl_err!("SumGpu not supported for {}", v),
+            }
         }
 
         let mut bytes = self
