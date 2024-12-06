@@ -1418,6 +1418,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "datafusion-gpu"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "cubecl",
+ "cubecl-reduce",
+ "cudarc",
+ "datafusion",
+ "delegate",
+ "rand",
+ "rustyline",
+ "tokio",
+]
+
+[[package]]
 name = "datafusion-optimizer"
 version = "43.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1527,22 +1543,6 @@ dependencies = [
  "parking_lot",
  "pin-project-lite",
  "rand",
- "tokio",
-]
-
-[[package]]
-name = "datafusion-playground"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "cubecl",
- "cubecl-reduce",
- "cudarc",
- "datafusion",
- "delegate",
- "rand",
- "rustyline",
  "tokio",
 ]
 
