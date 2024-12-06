@@ -66,6 +66,7 @@ Given the following conditions:
 - Datafusion runtime with two `sum` aggregation function variants:
     - `sum_cubecl`: using plane reduction kernel from [cudarc](https://github.com/coreylowman/cudarc)
     - `sum_cudarc`: using a handwritten CUDA kernel based on a shared memory algorithm
+- Code run with the following command: `cargo run --release --features cuda -- -l 1000000`
 
 | Query                               | Execution time |
 |-------------------------------------|----------------|
