@@ -1428,6 +1428,7 @@ dependencies = [
  "cudarc",
  "datafusion",
  "delegate",
+ "num-traits",
  "rand",
  "rustyline",
  "tokio",

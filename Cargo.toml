@@ -13,6 +13,7 @@ tokio = { version = "1.41.1" , features = ["full"]}
 delegate = "0.13.1"
 cubecl = { git = "https://github.com/tracel-ai/cubecl", rev = "1c4e0036c043422773fd6824c2a888160fca8e5e", features = ["wgpu"]}
 cubecl-reduce = { git = "https://github.com/tracel-ai/cubecl", rev = "1c4e0036c043422773fd6824c2a888160fca8e5e"}
+num-traits = "0.2"
 rand = "0.8.5"
 clap = { version = "4.5.21", features = ["derive"] }
 rustyline = "15.0.0"
