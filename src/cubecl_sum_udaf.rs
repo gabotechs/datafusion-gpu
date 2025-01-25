@@ -90,6 +90,7 @@ impl<R: Runtime> AggregateUDFImpl for GpuSum<R> {
 
 struct GpuSumAccumulator<R: Runtime> {
     compute_client: Arc<ComputeClient<R::Server, R::Channel>>,
+    // TODO: Having a generic number here is very difficult, I still don't know how to do it, so I just use f32.
     result: f32,
     has_processed: bool,
 }
@@ -127,7 +128,6 @@ fn sum<N: Numeric>(
 impl<R: Runtime> Accumulator for GpuSumAccumulator<R> {
     fn update_batch(&mut self, values: &[ArrayRef]) -> Result<()> {
         let len = values[0].len();
-        println!("Processing batch with length: {}, current result: {}", len, self.result);
 
         // Skip empty or invalid batches
         if values.is_empty() || values[0].len() == 0 {
@@ -139,10 +139,7 @@ impl<R: Runtime> Accumulator for GpuSumAccumulator<R> {
         let data = values[0].to_data();
         let data: &[u8] = data.buffers().first().map(|b| b.as_slice()).unwrap();
 
-        println!("Using GPU for length {}", len);
         let block_size = 256;
-        let num_blocks = (len + block_size - 1) / block_size;
-        println!("Block size: {}, Num blocks: {}", block_size, num_blocks);
 
         const LINE_SIZE: u8 = 1;
 
@@ -156,17 +153,11 @@ impl<R: Runtime> Accumulator for GpuSumAccumulator<R> {
         let output_handle = self.compute_client.empty(output_size);
         let input_handle = self.compute_client.create(data);
 
-        // Print first few input values for debugging
-        if *data_type == DataType::Float32 {
-            let input_values = f32::from_bytes(data);
-            println!("First few input values: {:?}", &input_values[..std::cmp::min(5, len)]);
-        }
-
         unsafe {
             macro_rules! run {
                 ($ty: ty) => {
                     sum::launch_unchecked::<$ty, R>(
-                        self.compute_client.as_ref(),
+                        self.compute_client.as_ref(),     
                         CubeCount::new_1d(1),  // Single output
                         CubeDim::new_1d(block_size as u32),
                         TensorArg::from_raw_parts::<$ty>(
@@ -183,7 +174,7 @@ impl<R: Runtime> Accumulator for GpuSumAccumulator<R> {
                         ),
                         ScalarArg::new(0),
                         block_size as u32,
-                        false,
+                        false, // TODO: calc if the plane dim has the exact size of the data.
                     )
                 };
             }
@@ -201,12 +192,6 @@ impl<R: Runtime> Accumulator for GpuSumAccumulator<R> {
             .read(vec![output_handle.clone().binding()]);
         let bytes = bytes.remove(0);
 
-        // Print output value for debugging
-        if *data_type == DataType::Float32 {
-            let output_value = f32::from_bytes(&bytes)[0];
-            println!("GPU output value: {}", output_value);
-        }
-
         let sum = match data_type {
             DataType::Int32 => i32::from_bytes(&bytes)[0] as f32,
             DataType::UInt32 => u32::from_bytes(&bytes)[0] as f32,
@@ -214,16 +199,12 @@ impl<R: Runtime> Accumulator for GpuSumAccumulator<R> {
             v => return not_impl_err!("SumGpu not supported for {}", v),
         };
         
-        println!("GPU sum for this batch: {}", sum);
         self.result += sum;
         self.has_processed = true;
         Ok(())
     }
 
     fn evaluate(&mut self) -> Result<ScalarValue> {
-        println!("Evaluating result: {} (has_processed: {})", 
-                self.result, 
-                self.has_processed);
         ScalarValue::new_primitive::<Float32Type>(Some(self.result), &DataType::Float32)
     }
 
@@ -233,15 +214,12 @@ impl<R: Runtime> Accumulator for GpuSumAccumulator<R> {
 
     fn state(&mut self) -> Result<Vec<ScalarValue>> {
         if !self.has_processed {
-            println!("Getting initial state (no data processed yet)");
             return Ok(vec![ScalarValue::new_primitive::<Float32Type>(Some(0.0), &DataType::Float32)?]);
         }
-        println!("Getting state, current result: {}", self.result);
         Ok(vec![self.evaluate()?])
     }
 
     fn merge_batch(&mut self, states: &[ArrayRef]) -> Result<()> {
-        println!("Merging {} states, current result: {}", states.len(), self.result);
         for state in states {
             if let ScalarValue::Float32(Some(value)) = ScalarValue::try_from_array(state, 0)? {
                 if value != 0.0 {  // Only merge non-zero states
