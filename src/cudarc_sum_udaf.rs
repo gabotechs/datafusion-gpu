@@ -1,5 +1,5 @@
 use cudarc::driver::{CudaDevice, CudaFunction, LaunchAsync, LaunchConfig};
-use cudarc::nvrtc::{compile_ptx};
+use cudarc::nvrtc::compile_ptx;
 use datafusion::arrow::array::{Array, ArrayRef};
 use datafusion::arrow::datatypes::{DataType, Field, Float32Type};
 use datafusion::common::{exec_err, not_impl_err, Result, ScalarValue};
@@ -16,38 +16,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 
 // language=cu
-const PTX_SRC: &str = "
-extern \"C\" __global__ void sum(float* input, float* result, int size) {
-    // Shared memory for storing partial sums
-    extern __shared__ float sharedData[];
-
-    // Thread index within the block
-    int threadId = threadIdx.x;
-    // Global index in the array
-    int globalIndex = blockIdx.x * blockDim.x + threadId;
-
-    // Load elements into shared memory
-    if (globalIndex < size) {
-        sharedData[threadId] = input[globalIndex];
-    } else {
-        sharedData[threadId] = 0.0f;  // Handle out-of-bounds threads
-    }
-    __syncthreads();
-
-    // Perform reduction in shared memory
-    for (int stride = blockDim.x / 2; stride > 0; stride /= 2) {
-        if (threadId < stride) {
-            sharedData[threadId] += sharedData[threadId + stride];
-        }
-        __syncthreads();
-    }
-
-    // Write the result of this block to the output array
-    if (threadId == 0) {
-        result[blockIdx.x] = sharedData[0];
-    }
-}
-";
+const PTX_SRC: &str = include_str!("sum.cu");
 
 pub fn udaf(dev: Arc<CudaDevice>) -> AggregateUDF {
     let ptx = compile_ptx(PTX_SRC).unwrap();
@@ -153,7 +122,7 @@ impl Accumulator for GpuSumAccumulator {
         let cfg = LaunchConfig {
             grid_dim: (num_blocks as u32, 1, 1),
             block_dim: (block_size as u32, 1, 1),
-            shared_mem_bytes: shared_mem as u32
+            shared_mem_bytes: shared_mem as u32,
         };
 
         let data = values[0].to_data();
