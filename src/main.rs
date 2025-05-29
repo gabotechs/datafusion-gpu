@@ -3,7 +3,13 @@ mod cubecl_sum_udaf;
 mod cudarc_sum_udaf;
 
 use clap::Parser;
+#[cfg(feature = "cuda")]
+use cubecl::cuda::CudaRuntime;
+#[cfg(not(feature = "cuda"))]
+use cubecl::wgpu::WgpuRuntime;
 use cubecl::Runtime;
+#[cfg(feature = "cuda")]
+use cudarc::driver::CudaDevice;
 use datafusion::arrow::array::{Float32Array, Int32Array, RecordBatch, StringArray};
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::datasource::MemTable;
@@ -14,12 +20,6 @@ use rand::Rng;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::sync::Arc;
-#[cfg(feature = "cuda")]
-use cubecl::cuda::CudaRuntime;
-#[cfg(feature = "cuda")]
-use cudarc::driver::CudaDevice;
-#[cfg(not(feature = "cuda"))]
-use cubecl::wgpu::WgpuRuntime;
 use tokio::time::Instant;
 
 #[derive(Parser)]
@@ -49,6 +49,7 @@ async fn main() -> anyhow::Result<()> {
         let start = Instant::now();
         df.show().await?;
         println!("Total execution time: {:?}", start.elapsed());
+        return Ok(());
     }
 
     loop {
@@ -129,7 +130,9 @@ where
 
 fn generate_random_letters(count: usize) -> Vec<String> {
     let mut rng = rand::thread_rng();
-    (0..count).map(|_| rng.gen_range('a'..='z').to_string()).collect()
+    (0..count)
+        .map(|_| rng.gen_range('a'..='z').to_string())
+        .collect()
 }
 
 fn generate_random_numbers<T>(count: usize) -> Vec<T>
@@ -139,4 +142,3 @@ where
     let mut rng = rand::thread_rng();
     (0..count).map(|_| rng.gen::<T>()).collect()
 }
-
