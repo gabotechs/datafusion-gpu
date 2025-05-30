@@ -13,14 +13,20 @@ pub fn cuda_sum(c: &mut Criterion) {
             .unwrap(),
     );
 
+    let ctx = tokio::sync::OnceCell::new();
+
     c.bench_function("cuda_sum", move |b| {
         let rt = rt.clone();
         b.to_async(rt.as_ref()).iter(|| async {
-            let ctx = build_ctx::<CudaRuntime>(&BuildCtxOpts {
-                types_table_length: 100000,
-            })
-            .await
-            .unwrap();
+            let ctx = ctx
+                .get_or_init(|| async {
+                    build_ctx::<CudaRuntime>(&BuildCtxOpts {
+                        types_table_length: 100000,
+                    })
+                    .await
+                    .unwrap()
+                })
+                .await;
 
             ctx.sql("SELECT sum_cudarc(float) FROM types")
                 .await
