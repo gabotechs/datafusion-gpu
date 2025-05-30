@@ -21,7 +21,7 @@ pub fn cuda_sum(c: &mut Criterion) {
             let ctx = ctx
                 .get_or_init(|| async {
                     build_ctx::<CudaRuntime>(&BuildCtxOpts {
-                        types_table_length: 100000,
+                        types_table_length: 1000000,
                     })
                     .await
                     .unwrap()
