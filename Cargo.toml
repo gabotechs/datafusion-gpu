@@ -17,3 +17,11 @@ rand = "0.8.5"
 clap = { version = "4.5.21", features = ["derive"] }
 rustyline = "15.0.0"
 cudarc = { version = "0.12.1" , optional = true }
+
+[dev-dependencies]
+criterion = { version = "0.6", features = ["async_tokio"] }
+
+[[bench]]
+name = "cuda_sum"
+harness = false
+required-features = ["cuda"]
